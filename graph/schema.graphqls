@@ -1,0 +1,67 @@
+# What an Element looks like when returned
+type Element {
+  uri: String!
+  title: String!
+  type_uri: String!
+  space_uri: String!
+  creation_date: String!
+  author: String!
+  field_values: [FieldValue!]!
+}
+
+# Each field value attached to an element
+type FieldValue {
+  uri: String!
+  value: Any        # can be text, number, boolean, etc.
+  field: Field!     # resolves to a Field object
+}
+
+# The field definition (like a column header)
+type Field {
+  uri: String!
+  name: String!
+  data_type: String!
+}
+
+# For pagination - a "page" of elements
+type ElementConnection {
+  edges: [ElementEdge!]!
+  pageInfo: PageInfo!
+}
+
+type ElementEdge {
+  cursor: String!
+  node: Element!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+# Filter input for querying elements
+input FieldValueFilter {
+  field_uri: String!
+  value: String!
+}
+
+# All available queries (reading data)
+type Query {
+  elements(
+    first: Int
+    after: String          # cursor for pagination
+    filter: FieldValueFilter
+  ): ElementConnection!
+}
+
+# All available mutations (changing data)
+type Mutation {
+  updateElement(uri: String!, title: String!): Element!
+}
+
+# Real-time subscriptions
+type Subscription {
+  elementUpdated: Element!
+}
+
+scalar Any

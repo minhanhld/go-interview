@@ -8,15 +8,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/example/ds-technical-assessment/graph"
+	"github.com/example/ds-technical-assessment/internal/auth"
 )
 
 // Run initializes and starts the GraphQL server
 func Run(ctx context.Context, db *sql.DB, addr string) error {
-	graphqlHandler := newGraphQLHandler()
+	graphqlHandler := newGraphQLHandler(db)
 	healthHandler := newHealthHandler(db)
-	
+
 	http.Handle("/graphql", graphqlHandler)
 	http.Handle("/health", healthHandler)
 
@@ -41,14 +43,34 @@ func Run(ctx context.Context, db *sql.DB, addr string) error {
 	return server.Shutdown(shutdownCtx)
 }
 
-func newGraphQLHandler() http.Handler {
-	srv := handler.NewDefaultServer(&graphql.ExecutableSchemaMock{})
-	// Build your solution here and replace the mock schema above
+func newGraphQLHandler(db *sql.DB) http.Handler {
+	resolver := graph.NewResolver(db)
+	schema := graph.NewExecutableSchema(graph.Config{
+		Resolvers: resolver,
+	})
+	srv := handler.New(schema)
+	srv.AddTransport(transport.POST{})
+	srv.AddTransport(transport.Websocket{
+		KeepAlivePingInterval: 10 * time.Second,
+	})
 
+	return authMiddleware(srv)
+}
+
+func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		srv.ServeHTTP(w, r)
+		userID := r.Header.Get("X-User-ID")
+		if userID == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "X-User-ID header is required",
+			})
+			return
+		}
+		ctx := auth.SetUserID(r.Context(), userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
 
 func newHealthHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
