@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/example/ds-technical-assessment/graph/model"
@@ -186,13 +187,11 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 	for i, e := range elements {
 		uris[i] = e.URI
 	}
-	placeholder := ""
-	for i := range uris {
-		if i > 0 {
-			placeholder += ","
-		}
-		placeholder += fmt.Sprintf("$%d", i+1)
+	placeholderSlice := make([]string, len(uris))
+	for i := range placeholderSlice {
+		placeholderSlice[i] = fmt.Sprintf("$%d", i+1)
 	}
+	placeholder := strings.Join(placeholderSlice, ",")
 	query := fmt.Sprintf(`
 		SELECT
 			efv.uri,
