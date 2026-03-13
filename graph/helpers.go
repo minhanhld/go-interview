@@ -151,3 +151,46 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 	}
 	return rows.Err()
 }
+
+// =============================================================================
+// HELPER: fetchOneElement
+// =============================================================================
+// Fetches a single element by URI and populates its field values.
+// Used by UpdateElement to return the full element after mutation.
+func fetchOneElement(ctx context.Context, db *sql.DB, uri string) (*model.Element, error) {
+	var elem model.Element
+	var creationDateMs int64
+
+	// QueryRowContext is like QueryContext but for a single row.
+	// .Scan() directly on the returned *sql.Row (no rows.Next() needed).
+	// If no row is found, Scan returns sql.ErrNoRows.
+	err := db.QueryRowContext(ctx, `
+		SELECT
+			e.uri,
+			e.title,
+			e.type_uri,
+			e.space_uri,
+			e.creation_date,
+			u.display_name AS author
+		FROM elements e
+		JOIN users u ON e.author = u.uri
+		WHERE e.uri = $1
+	`, uri).Scan(
+		&elem.URI,
+		&elem.Title,
+		&elem.TypeURI,
+		&elem.SpaceURI,
+		&creationDateMs,
+		&elem.Author,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("fetching element %s: %w", uri, err)
+	}
+	elem.CreationDate = time.UnixMilli(creationDateMs).UTC().Format(time.RFC3339)
+	elements := []*model.Element{&elem}
+	err = loadFieldValues(ctx, db, elements)
+	if err != nil {
+		return nil, err
+	}
+	return &elem, nil
+}

@@ -15,9 +15,40 @@ import (
 )
 
 // UpdateElement is the resolver for the updateElement field.
-func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title string) (*model.Element, error) {
-	panic(fmt.Errorf("not implemented: UpdateElement - updateElement"))
-}
+	func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title string) (*model.Element, error) {
+		_, err := auth.GetUserID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result, err := r.database.ExecContext(ctx,
+			`UPDATE elements SET title = $1 WHERE uri = $2`,
+			title, uri,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("updating element title: %w", err)
+		}
+		n, err := result.RowsAffected()
+		fmt.Printf("%d", n)
+		if err != nil {
+			return nil, fmt.Errorf("checking rows affected: %w", err)
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("element not found: %s", uri)
+		}
+		elem, err := fetchOneElement(ctx, r.database, uri)
+		if err != nil {
+			return nil, err
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for ch := range r.subscribers {
+			select {
+			case ch <- elem:
+			default:
+			}
+		}
+		return elem, nil
+	} 
 
 // Elements is the resolver for the elements field.
 func (r *queryResolver) Elements(ctx context.Context, first *int32, after *string, filter *model.FieldValueFilter) (*model.ElementConnection, error) {
@@ -155,8 +186,30 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 }
 
 // ElementUpdated is the resolver for the elementUpdated field.
+// =============================================================================
+// SUBSCRIPTION: ElementUpdated
+// =============================================================================
+// Called once when a client subscribes. Returns a channel that gqlgen reads
+// from and streams to the client over WebSocket.
 func (r *subscriptionResolver) ElementUpdated(ctx context.Context) (<-chan *model.Element, error) {
-	panic(fmt.Errorf("not implemented: ElementUpdated - elementUpdated"))
+
+	// ---- 1. Auth ----
+	_, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan *model.Element, 1)
+	r.mu.Lock()
+	r.subscribers[ch] = struct{}{}
+	r.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		r.mu.Lock()
+		delete(r.subscribers, ch)
+		close(ch)
+		r.mu.Unlock()
+	}()
+	return ch, nil
 }
 
 // Mutation returns MutationResolver implementation.
