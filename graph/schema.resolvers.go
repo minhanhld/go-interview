@@ -97,7 +97,7 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 		}
 	}()
 
-	elements := make([]*model.Element,0, limit + 1)
+	elements := make([]*model.Element, 0, limit+1)
 	for rows.Next() {
 		elem := &model.Element{}
 		var creationDateMs int64
@@ -153,8 +153,6 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 		},
 	}, nil
 }
-
-
 
 // ElementUpdated is the resolver for the elementUpdated field.
 func (r *subscriptionResolver) ElementUpdated(ctx context.Context) (<-chan *model.Element, error) {
