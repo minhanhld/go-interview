@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"encoding/json"
 
 	"github.com/example/ds-technical-assessment/graph/model"
 )
@@ -48,7 +49,8 @@ func getRows(ctx context.Context, db *sql.DB, elements []*model.Element) (*sql.R
 			efv.value_json,
 			f.uri  AS field_uri,
 			f.name AS field_name,
-			f.field_type
+			f.field_type,
+			f.options
 		FROM element_field_values efv
 		JOIN fields f ON efv.field_uri = f.uri
 		WHERE efv.element_uri IN (%s)
@@ -88,6 +90,7 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 			fieldURI   		string
 			fieldName  		string
 			fieldDataType  	string
+			fieldOptions	sql.NullString
 		)
 
 		err := rows.Scan(
@@ -101,6 +104,7 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 			&fieldURI,
 			&fieldName,
 			&fieldDataType,
+			&fieldOptions,
 		)
 		if err != nil {
 			return fmt.Errorf("scanning field value: %w", err)
@@ -119,13 +123,22 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 			value = valueJSON.String
 		}
 
+		var options map[string]any
+		if fieldOptions.Valid {
+			err := json.Unmarshal([]byte(fieldOptions.String), &options)
+			if (err != nil) {
+				return fmt.Errorf("scanning field value: %w", err)
+			}
+		}
+
 		fieldValue := &model.FieldValue{
 			URI:   fieldValueURI,
 			Value: value,
 			Field: &model.Field{
-				URI:      fieldURI,
-				Name:     fieldName,
-				DataType: fieldDataType,
+				URI:      	fieldURI,
+				Name:     	fieldName,
+				DataType:	fieldDataType,
+				Options:	options["options"],
 			},
 		}
 		if elem, ok := elementsByURI[elemURI]; ok {
