@@ -1,4 +1,3 @@
-# What an Element looks like when returned
 type Element {
   uri: String!
   title: String!
@@ -9,21 +8,19 @@ type Element {
   field_values: [FieldValue!]!
 }
 
-# Each field value attached to an element
 type FieldValue {
   uri: String!
   value: Any        # can be text, number, boolean, etc.
   field: Field!     # resolves to a Field object
 }
 
-# The field definition (like a column header)
 type Field {
   uri: String!
   name: String!
   data_type: String!
+  options: Any
 }
 
-# For pagination - a "page" of elements
 type ElementConnection {
   edges: [ElementEdge!]!
   pageInfo: PageInfo!
@@ -39,13 +36,11 @@ type PageInfo {
   endCursor: String
 }
 
-# Filter input for querying elements
 input FieldValueFilter {
   field_uri: String!
   value: String!
 }
 
-# All available queries (reading data)
 type Query {
   elements(
     first: Int
@@ -54,12 +49,10 @@ type Query {
   ): ElementConnection!
 }
 
-# All available mutations (changing data)
 type Mutation {
   updateElement(uri: String!, title: String!): Element!
 }
 
-# Real-time subscriptions
 type Subscription {
   elementUpdated: Element!
 }

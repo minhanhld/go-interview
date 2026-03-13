@@ -26,6 +26,7 @@ type Field struct {
 	URI      string `json:"uri"`
 	Name     string `json:"name"`
 	DataType string `json:"data_type"`
+	Options  any    `json:"options,omitempty"`
 }
 
 type FieldValue struct {

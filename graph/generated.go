@@ -60,6 +60,7 @@ type ComplexityRoot struct {
 	Field struct {
 		DataType func(childComplexity int) int
 		Name     func(childComplexity int) int
+		Options  func(childComplexity int) int
 		URI      func(childComplexity int) int
 	}
 
@@ -192,6 +193,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Field.Name(childComplexity), true
+	case "Field.options":
+		if e.ComplexityRoot.Field.Options == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Field.Options(childComplexity), true
 	case "Field.uri":
 		if e.ComplexityRoot.Field.URI == nil {
 			break
@@ -924,6 +931,35 @@ func (ec *executionContext) fieldContext_Field_data_type(_ context.Context, fiel
 	return fc, nil
 }
 
+func (ec *executionContext) _Field_options(ctx context.Context, field graphql.CollectedField, obj *model.Field) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Field_options,
+		func(ctx context.Context) (any, error) {
+			return obj.Options, nil
+		},
+		nil,
+		ec.marshalOAny2interface,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Field_options(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Field",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Any does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _FieldValue_uri(ctx context.Context, field graphql.CollectedField, obj *model.FieldValue) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1012,6 +1048,8 @@ func (ec *executionContext) fieldContext_FieldValue_field(_ context.Context, fie
 				return ec.fieldContext_Field_name(ctx, field)
 			case "data_type":
 				return ec.fieldContext_Field_data_type(ctx, field)
+			case "options":
+				return ec.fieldContext_Field_options(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Field", field.Name)
 		},
@@ -3008,6 +3046,8 @@ func (ec *executionContext) _Field(ctx context.Context, sel ast.SelectionSet, ob
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "options":
+			out.Values[i] = ec._Field_options(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
