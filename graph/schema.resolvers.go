@@ -7,10 +7,8 @@ package graph
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/example/ds-technical-assessment/graph/model"
@@ -119,9 +117,13 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 	if err != nil {
 		return nil, fmt.Errorf("querying elements: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
-	var elements []*model.Element
+	elements := make([]*model.Element,0, limit + 1)
 	for rows.Next() {
 		elem := &model.Element{}
 		var creationDateMs int64
@@ -178,102 +180,7 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 	}, nil
 }
 
-func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element) error {
-	elemByURI := make(map[string]*model.Element, len(elements))
-	for _, e := range elements {
-		elemByURI[e.URI] = e
-	}
-	uris := make([]any, len(elements))
-	for i, e := range elements {
-		uris[i] = e.URI
-	}
-	placeholderSlice := make([]string, len(uris))
-	for i := range placeholderSlice {
-		placeholderSlice[i] = fmt.Sprintf("$%d", i+1)
-	}
-	placeholder := strings.Join(placeholderSlice, ",")
-	query := fmt.Sprintf(`
-		SELECT
-			efv.uri,
-			efv.element_uri,
-			efv.value_text,
-			efv.value_number,
-			efv.value_date,
-			efv.value_boolean,
-			efv.value_json,
-			f.uri  AS field_uri,
-			f.name AS field_name,
-			f.field_type
-		FROM element_field_values efv
-		JOIN fields f ON efv.field_uri = f.uri
-		WHERE efv.element_uri IN (%s)
-		ORDER BY efv.element_uri, f.name
-	`, placeholder)
 
-	rows, err := db.QueryContext(ctx, query, uris...)
-	if err != nil {
-		return fmt.Errorf("querying field values: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var (
-			fvURI      string
-			elemURI    string
-			valueText  sql.NullString
-			valueNum   sql.NullFloat64
-			valueDate  sql.NullInt64
-			valueBool  sql.NullBool
-			valueJSON  sql.NullString
-			fieldURI   string
-			fieldName  string
-			fieldType  string
-		)
-
-		err := rows.Scan(
-			&fvURI,
-			&elemURI,
-			&valueText,
-			&valueNum,
-			&valueDate,
-			&valueBool,
-			&valueJSON,
-			&fieldURI,
-			&fieldName,
-			&fieldType,
-		)
-		if err != nil {
-			return fmt.Errorf("scanning field value: %w", err)
-		}
-		var value any
-		switch {
-		case valueText.Valid:
-			value = valueText.String
-		case valueNum.Valid:
-			value = valueNum.Float64
-		case valueBool.Valid:
-			value = valueBool.Bool
-		case valueDate.Valid:
-			value = time.UnixMilli(valueDate.Int64).UTC().Format(time.RFC3339)
-		case valueJSON.Valid:
-			value = valueJSON.String
-		}
-
-		fv := &model.FieldValue{
-			URI:   fvURI,
-			Value: value,
-			Field: &model.Field{
-				URI:      fieldURI,
-				Name:     fieldName,
-				DataType: fieldType,
-			},
-		}
-		if elem, ok := elemByURI[elemURI]; ok {
-			elem.FieldValues = append(elem.FieldValues, fv)
-		}
-	}
-	return rows.Err()
-}
 
 // ElementUpdated is the resolver for the elementUpdated field.
 func (r *subscriptionResolver) ElementUpdated(ctx context.Context) (<-chan *model.Element, error) {
@@ -292,30 +199,3 @@ func (r *Resolver) Subscription() SubscriptionResolver { return &subscriptionRes
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type subscriptionResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
-/*
-	func (r *mutationResolver) CreateTodo(ctx context.Context, input model.NewTodo) (*model.Todo, error) {
-	randNumber, _ := rand.Int(rand.Reader, big.NewInt(100))
-	todo := &model.Todo{
-		Text:   input.Text,
-		ID:     fmt.Sprintf("T%d", randNumber),
-		UserID: input.UserID,
-	}
-	r.todos = append(r.todos, todo)
-	return todo, nil
-}
-func (r *queryResolver) Todos(ctx context.Context) ([]*model.Todo, error) {
-	return r.todos, nil
-}
-func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
-	return &model.User{ID: obj.UserID, Name: "user " + obj.UserID}, nil
-}
-func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
-type todoResolver struct{ *Resolver }
-*/
