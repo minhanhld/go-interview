@@ -27,6 +27,7 @@ type Field struct {
 	Name     string `json:"name"`
 	DataType string `json:"data_type"`
 	Options  any    `json:"options,omitempty"`
+	Required bool   `json:"required"`
 }
 
 type FieldValue struct {

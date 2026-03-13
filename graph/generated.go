@@ -61,6 +61,7 @@ type ComplexityRoot struct {
 		DataType func(childComplexity int) int
 		Name     func(childComplexity int) int
 		Options  func(childComplexity int) int
+		Required func(childComplexity int) int
 		URI      func(childComplexity int) int
 	}
 
@@ -199,6 +200,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Field.Options(childComplexity), true
+	case "Field.required":
+		if e.ComplexityRoot.Field.Required == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Field.Required(childComplexity), true
 	case "Field.uri":
 		if e.ComplexityRoot.Field.URI == nil {
 			break
@@ -960,6 +967,35 @@ func (ec *executionContext) fieldContext_Field_options(_ context.Context, field 
 	return fc, nil
 }
 
+func (ec *executionContext) _Field_required(ctx context.Context, field graphql.CollectedField, obj *model.Field) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Field_required,
+		func(ctx context.Context) (any, error) {
+			return obj.Required, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Field_required(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Field",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _FieldValue_uri(ctx context.Context, field graphql.CollectedField, obj *model.FieldValue) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1050,6 +1086,8 @@ func (ec *executionContext) fieldContext_FieldValue_field(_ context.Context, fie
 				return ec.fieldContext_Field_data_type(ctx, field)
 			case "options":
 				return ec.fieldContext_Field_options(ctx, field)
+			case "required":
+				return ec.fieldContext_Field_required(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Field", field.Name)
 		},
@@ -3048,6 +3086,11 @@ func (ec *executionContext) _Field(ctx context.Context, sel ast.SelectionSet, ob
 			}
 		case "options":
 			out.Values[i] = ec._Field_options(ctx, field, obj)
+		case "required":
+			out.Values[i] = ec._Field_required(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}

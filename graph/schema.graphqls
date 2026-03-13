@@ -19,6 +19,7 @@ type Field {
   name: String!
   data_type: String!
   options: Any
+  required: Boolean!
 }
 
 type ElementConnection {
