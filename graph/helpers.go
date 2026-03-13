@@ -3,12 +3,29 @@ package graph
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/example/ds-technical-assessment/graph/model"
 )
+
+func encodeCursor(uri string) string {
+	return base64.StdEncoding.EncodeToString([]byte(uri))
+}
+
+
+func decodeCursor(cursor string) (string, error) {
+	b, err := base64.StdEncoding.DecodeString(cursor)
+	if err != nil {
+		// %w is a special verb in fmt.Errorf that WRAPS the original error.
+		// This preserves the original error so callers can inspect it with
+		// errors.Is() or errors.As() if needed.
+		return "", fmt.Errorf("invalid cursor: %w", err)
+	}
+	return string(b), nil
+}
 
 func getRows(ctx context.Context, db *sql.DB, elements []*model.Element) (*sql.Rows, error) {
 	elementsURIs := make([]any, len(elements))

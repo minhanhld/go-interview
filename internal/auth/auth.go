@@ -1,6 +1,9 @@
 package auth
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type contextKey string
 
@@ -12,10 +15,10 @@ func SetUserID(ctx context.Context, userID string) context.Context {
 }
     
 // GetUserID retrieves the user ID from the context. Called by resolvers.
-func GetUserID(ctx context.Context) (string, bool) {
+func GetUserID(ctx context.Context) (string, error) {
     userID, ok := ctx.Value(userIDKey).(string)
     if (!ok || userID == "") {
-        return "", false
+        return "", fmt.Errorf("unauthorized: missing user ID")
     }
-    return userID, true
+    return userID, nil
 }

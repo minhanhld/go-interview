@@ -7,38 +7,12 @@ package graph
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"time"
 
 	"github.com/example/ds-technical-assessment/graph/model"
 	"github.com/example/ds-technical-assessment/internal/auth"
 )
-
-func getUserID(ctx context.Context) (string, error) {
-	userID, ok := auth.GetUserID(ctx)
-	if !ok || userID == "" {
-		return "", fmt.Errorf("unauthorized: missing user ID")
-	}
-	return userID, nil
-}
-
-func encodeCursor(uri string) string {
-	return base64.StdEncoding.EncodeToString([]byte(uri))
-}
-
-
-func decodeCursor(cursor string) (string, error) {
-	b, err := base64.StdEncoding.DecodeString(cursor)
-	if err != nil {
-		// %w is a special verb in fmt.Errorf that WRAPS the original error.
-		// This preserves the original error so callers can inspect it with
-		// errors.Is() or errors.As() if needed.
-		return "", fmt.Errorf("invalid cursor: %w", err)
-	}
-	return string(b), nil
-}
-
 
 // UpdateElement is the resolver for the updateElement field.
 func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title string) (*model.Element, error) {
@@ -47,7 +21,7 @@ func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title 
 
 // Elements is the resolver for the elements field.
 func (r *queryResolver) Elements(ctx context.Context, first *int32, after *string, filter *model.FieldValueFilter) (*model.ElementConnection, error) {
-	userID, err := getUserID(ctx)
+	userID, err := auth.GetUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
