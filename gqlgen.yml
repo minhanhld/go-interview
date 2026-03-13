@@ -157,7 +157,7 @@ call_argument_directives_with_null: true
 # gqlgen will search for any type names in the schema in these go packages
 # if they match it will use them, otherwise it will generate them.
 autobind:
- - "github.com/example/ds-technical-assessment/graph/model"
+#  - "github.com/example/ds-technical-assessment/graph/model"
 
 # This section declares type mapping between the GraphQL and go type systems
 #
@@ -176,10 +176,6 @@ models:
   UUID:
     model:
       - github.com/99designs/gqlgen/graphql.UUID
-  Todo:
-    fields:
-      user:
-        resolver: true
 
   # The GraphQL spec explicitly states that the Int type is a signed 32-bit
   # integer. Using Go int or int64 to represent it can lead to unexpected
