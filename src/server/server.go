@@ -10,11 +10,10 @@ import (
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/example/ds-technical-assessment/graph"
 	"github.com/example/ds-technical-assessment/internal/auth"
 )
-
-import "github.com/99designs/gqlgen/graphql/playground"
 
 // Run initializes and starts the GraphQL server
 func Run(ctx context.Context, db *sql.DB, addr string) error {
@@ -46,6 +45,14 @@ func Run(ctx context.Context, db *sql.DB, addr string) error {
 	return server.Shutdown(shutdownCtx)
 }
 
+func BuildHandler(db *sql.DB) http.Handler {
+	return newGraphQLHandler(db)
+}
+
+func BuildHealthHandler(db *sql.DB) http.HandlerFunc {
+	return newHealthHandler(db)
+}
+
 func newGraphQLHandler(db *sql.DB) http.Handler {
 	resolver := graph.NewResolver(db)
 	schema := graph.NewExecutableSchema(graph.Config{
@@ -62,12 +69,15 @@ func newGraphQLHandler(db *sql.DB) http.Handler {
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Header.Get("X-User-ID")
-		// if userID == "" {
-		// 	writeJSON(w, http.StatusUnauthorized, map[string]string{
-		// 		"error": "X-User-ID header is required",
-		// 	})
-		// 	return
-		// }
+		if userID == "" {
+            userID = r.URL.Query().Get("user_id")
+        }
+		if userID == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "X-User-ID header is required",
+			})
+			return
+		}
 		ctx := auth.SetUserID(r.Context(), userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
