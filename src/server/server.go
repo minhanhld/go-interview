@@ -13,6 +13,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/example/ds-technical-assessment/graph"
 	"github.com/example/ds-technical-assessment/internal/auth"
+	"github.com/gorilla/websocket"
 )
 
 // Run initializes and starts the GraphQL server
@@ -60,7 +61,15 @@ func newGraphQLHandler(db *sql.DB) http.Handler {
 	})
 	srv := handler.New(schema)
 	srv.AddTransport(transport.Websocket{
-		KeepAlivePingInterval: 10 * time.Second,
+    KeepAlivePingInterval: 10 * time.Second,
+		Upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		},
+		InitFunc: func(ctx context.Context, initPayload transport.InitPayload) (context.Context, *transport.InitPayload, error) {
+			userID, _ := initPayload["X-User-ID"].(string)
+			ctx = auth.SetUserID(ctx, userID)
+			return ctx, &initPayload, nil
+		},
 	})
 	srv.AddTransport(transport.POST{})
 	return authMiddleware(srv)
@@ -68,10 +77,11 @@ func newGraphQLHandler(db *sql.DB) http.Handler {
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Header.Get("X-User-ID")
-		if userID == "" {
-            userID = r.URL.Query().Get("user_id")
+		if r.Header.Get("Upgrade") == "websocket" {
+			next.ServeHTTP(w, r)
+            return
         }
+		userID := r.Header.Get("X-User-ID")
 		if userID == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{
 				"error": "X-User-ID header is required",
