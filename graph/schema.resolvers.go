@@ -15,40 +15,39 @@ import (
 )
 
 // UpdateElement is the resolver for the updateElement field.
-	func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title string) (*model.Element, error) {
-		_, err := auth.GetUserID(ctx)
-		if err != nil {
-			return nil, err
+func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title string) (*model.Element, error) {
+	_, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err := r.database.ExecContext(ctx,
+		`UPDATE elements SET title = $1 WHERE uri = $2`,
+		title, uri,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("updating element title: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("checking rows affected: %w", err)
+	}
+	if n == 0 {
+		return nil, fmt.Errorf("element not found: %s", uri)
+	}
+	elem, err := fetchOneElement(ctx, r.database, uri)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for ch := range r.subscribers {
+		select {
+		case ch <- elem:
+		default:
 		}
-		result, err := r.database.ExecContext(ctx,
-			`UPDATE elements SET title = $1 WHERE uri = $2`,
-			title, uri,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("updating element title: %w", err)
-		}
-		n, err := result.RowsAffected()
-		fmt.Printf("%d", n)
-		if err != nil {
-			return nil, fmt.Errorf("checking rows affected: %w", err)
-		}
-		if n == 0 {
-			return nil, fmt.Errorf("element not found: %s", uri)
-		}
-		elem, err := fetchOneElement(ctx, r.database, uri)
-		if err != nil {
-			return nil, err
-		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		for ch := range r.subscribers {
-			select {
-			case ch <- elem:
-			default:
-			}
-		}
-		return elem, nil
-	} 
+	}
+	return elem, nil
+}
 
 // Elements is the resolver for the elements field.
 func (r *queryResolver) Elements(ctx context.Context, first *int32, after *string, filter *model.FieldValueFilter) (*model.ElementConnection, error) {
