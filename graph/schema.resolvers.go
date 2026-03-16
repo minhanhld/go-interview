@@ -8,6 +8,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/example/ds-technical-assessment/graph/model"
@@ -43,7 +44,9 @@ func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title 
 	for ch := range r.subscribers {
 		select {
 		case ch <- elem:
+			log.Printf("pushed update for element %s to subscriber", uri)
 		default:
+			log.Printf("subscriber channel full, skipping")
 		}
 	}
 	return elem, nil
