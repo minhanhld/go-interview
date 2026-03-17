@@ -10,11 +10,11 @@ import (
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/example/ds-technical-assessment/graph"
 	"github.com/example/ds-technical-assessment/internal/auth"
+	"github.com/gorilla/websocket"
 )
-
-import "github.com/99designs/gqlgen/graphql/playground"
 
 // Run initializes and starts the GraphQL server
 func Run(ctx context.Context, db *sql.DB, addr string) error {
@@ -24,7 +24,7 @@ func Run(ctx context.Context, db *sql.DB, addr string) error {
 	http.Handle("/graphql", graphqlHandler)
 	http.Handle("/health", healthHandler)
 	http.Handle("/", playground.Handler("GraphQL Playground", "/graphql"))
-
+	log.Printf("Playground available at http://localhost%s/", addr)
 	log.Printf("GraphQL endpoint available at http://localhost%s/graphql", addr)
 
 	server := &http.Server{
@@ -46,6 +46,14 @@ func Run(ctx context.Context, db *sql.DB, addr string) error {
 	return server.Shutdown(shutdownCtx)
 }
 
+func BuildHandler(db *sql.DB) http.Handler {
+	return newGraphQLHandler(db)
+}
+
+func BuildHealthHandler(db *sql.DB) http.HandlerFunc {
+	return newHealthHandler(db)
+}
+
 func newGraphQLHandler(db *sql.DB) http.Handler {
 	resolver := graph.NewResolver(db)
 	schema := graph.NewExecutableSchema(graph.Config{
@@ -53,7 +61,15 @@ func newGraphQLHandler(db *sql.DB) http.Handler {
 	})
 	srv := handler.New(schema)
 	srv.AddTransport(transport.Websocket{
-		KeepAlivePingInterval: 10 * time.Second,
+    KeepAlivePingInterval: 10 * time.Second,
+		Upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		},
+		InitFunc: func(ctx context.Context, initPayload transport.InitPayload) (context.Context, *transport.InitPayload, error) {
+			userID, _ := initPayload["X-User-ID"].(string)
+			ctx = auth.SetUserID(ctx, userID)
+			return ctx, &initPayload, nil
+		},
 	})
 	srv.AddTransport(transport.POST{})
 	return authMiddleware(srv)
@@ -61,18 +77,21 @@ func newGraphQLHandler(db *sql.DB) http.Handler {
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Upgrade") == "websocket" {
+			next.ServeHTTP(w, r)
+            return
+        }
 		userID := r.Header.Get("X-User-ID")
-		// if userID == "" {
-		// 	writeJSON(w, http.StatusUnauthorized, map[string]string{
-		// 		"error": "X-User-ID header is required",
-		// 	})
-		// 	return
-		// }
+		if userID == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "X-User-ID header is required",
+			})
+			return
+		}
 		ctx := auth.SetUserID(r.Context(), userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
-
 
 func newHealthHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

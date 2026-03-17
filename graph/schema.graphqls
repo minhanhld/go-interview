@@ -10,8 +10,8 @@ type Element {
 
 type FieldValue {
   uri: String!
-  value: Any        # can be text, number, boolean, etc.
-  field: Field!     # resolves to a Field object
+  value: Any
+  field: Field!
 }
 
 type Field {
@@ -45,13 +45,16 @@ input FieldValueFilter {
 type Query {
   elements(
     first: Int
-    after: String          # cursor for pagination
+    after: String
     filter: FieldValueFilter
   ): ElementConnection!
 }
 
 type Mutation {
-  updateElement(uri: String!, title: String!): Element!
+  updateElement(
+    uri: String!
+    title: String!
+    ): Element!
 }
 
 type Subscription {

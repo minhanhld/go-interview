@@ -16,13 +16,9 @@ func encodeCursor(uri string) string {
 	return base64.StdEncoding.EncodeToString([]byte(uri))
 }
 
-
 func decodeCursor(cursor string) (string, error) {
 	b, err := base64.StdEncoding.DecodeString(cursor)
 	if err != nil {
-		// %w is a special verb in fmt.Errorf that WRAPS the original error.
-		// This preserves the original error so callers can inspect it with
-		// errors.Is() or errors.As() if needed.
 		return "", fmt.Errorf("invalid cursor: %w", err)
 	}
 	return string(b), nil
@@ -61,9 +57,7 @@ func getRows(ctx context.Context, db *sql.DB, elements []*model.Element) (*sql.R
 	return db.QueryContext(ctx, query, elementsURIs...)	
 }
 
-// loadFieldValues fetches all field values for a batch of element in ONE query then distributes them accordingly
-//
-// This avoids the "N+1" query issue
+// loadFieldValues fetches all field values for a batch of element in ONE query then distributes them accordingly.
 func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element) error {
 	elementsByURI := make(map[string]*model.Element, len(elements))
 	for _, elemCopy := range elements {
@@ -152,18 +146,10 @@ func loadFieldValues(ctx context.Context, db *sql.DB, elements []*model.Element)
 	return rows.Err()
 }
 
-// =============================================================================
-// HELPER: fetchOneElement
-// =============================================================================
-// Fetches a single element by URI and populates its field values.
-// Used by UpdateElement to return the full element after mutation.
+// fetchOneElement fetches a single element by URI and populates its field values.
 func fetchOneElement(ctx context.Context, db *sql.DB, uri string) (*model.Element, error) {
 	var elem model.Element
 	var creationDateMs int64
-
-	// QueryRowContext is like QueryContext but for a single row.
-	// .Scan() directly on the returned *sql.Row (no rows.Next() needed).
-	// If no row is found, Scan returns sql.ErrNoRows.
 	err := db.QueryRowContext(ctx, `
 		SELECT
 			e.uri,
