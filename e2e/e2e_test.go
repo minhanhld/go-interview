@@ -44,7 +44,7 @@ import (
 )
 
 
-// testServer starts the real HTTP server using Go's httptest.NewServer.
+// testServer starts a HTTP server using Go's httptest.NewServer.
 func testServer(t *testing.T, database *sql.DB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -66,11 +66,7 @@ func openTestDB(t *testing.T) *sql.DB {
 	database, err := sql.Open("postgres", connStr)
 	if err != nil {
 		t.Fatalf("opening test DB: %v", err)
-		// t.Fatalf logs the message and immediately stops this test.
-		// It's like t.Errorf (marks the test as failed) + return.
 	}
-
-	// Give the DB 5 seconds to become available (useful in CI environments).
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := database.PingContext(ctx); err != nil {
