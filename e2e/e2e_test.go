@@ -1,28 +1,3 @@
-// Package e2e contains end-to-end tests for the GraphQL API.
-//
-// =============================================================================
-// WHAT IS AN END-TO-END TEST IN GO?
-// =============================================================================
-// Go's testing system is built into the standard library. Any file ending in
-// `_test.go` is a test file. Functions named `TestXxx(t *testing.T)` are test
-// cases that `go test` will discover and run automatically.
-//
-// An E2E test is different from a unit test:
-//   - Unit test: tests one function in isolation, mocking dependencies
-//   - E2E test: tests the WHOLE system running for real (real HTTP, real DB)
-//
-// Our E2E tests will:
-//   1. Start the real server (with a real DB connection)
-//   2. Make real HTTP requests with the GraphQL protocol
-//   3. Assert the responses are correct
-//
-// HOW TO RUN:
-//   go test ./e2e/... -v
-//   (or, if this file is at the root: go test . -run TestE2E -v)
-//
-// The -v flag shows verbose output (prints t.Log messages).
-// The DATABASE_URL environment variable must point to a running PostgreSQL.
-
 package e2e
 
 import (
