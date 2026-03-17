@@ -43,10 +43,9 @@ func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title 
 	defer r.mu.Unlock()
 	for ch := range r.subscribers {
 		select {
-		case ch <- elem:
-			log.Printf("pushed update for element %s to subscriber", uri)
-		default:
-			log.Printf("subscriber channel full, skipping")
+			case ch <- elem:
+				log.Printf("pushed update for element \"%s\" to subscriber", uri)
+			default:
 		}
 	}
 	return elem, nil
@@ -78,7 +77,7 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 		}
 	}
 
-	args := []any{userID} // $1 = userID
+	args := []any{userID}
 
 	query := `
 		SELECT
@@ -188,14 +187,7 @@ func (r *queryResolver) Elements(ctx context.Context, first *int32, after *strin
 }
 
 // ElementUpdated is the resolver for the elementUpdated field.
-// =============================================================================
-// SUBSCRIPTION: ElementUpdated
-// =============================================================================
-// Called once when a client subscribes. Returns a channel that gqlgen reads
-// from and streams to the client over WebSocket.
 func (r *subscriptionResolver) ElementUpdated(ctx context.Context) (<-chan *model.Element, error) {
-
-	// ---- 1. Auth ----
 	_, err := auth.GetUserID(ctx)
 	if err != nil {
 		return nil, err

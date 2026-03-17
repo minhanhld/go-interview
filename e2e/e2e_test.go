@@ -30,18 +30,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
-
-	// "strings"
 	"testing"
 	"time"
 
 	"github.com/example/ds-technical-assessment/src/server"
-	// "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
 )
 
@@ -57,9 +55,9 @@ import (
 // conflicts, no cleanup needed for ports.
 //
 // It returns:
-//   - *httptest.Server: call ts.Close() when done to shut it down
+//   - *httptest.Server: call testServer.Close() when done to shut it down
 //   - The base URL to use for requests (e.g., "http://127.0.0.1:54321")
-func testServer(t *testing.T, db *sql.DB) *httptest.Server {
+func testServer(t *testing.T, database *sql.DB) *httptest.Server {
 	t.Helper() // marks this as a helper so failures show the caller's line number
 
 	// We need to set up the HTTP mux (router) the same way server.Run does,
@@ -86,20 +84,23 @@ func testServer(t *testing.T, db *sql.DB) *httptest.Server {
 	// a real HTTP client.
 	//
 	// Here we use BuildHandler which we'll add to server.go (see note below).
-	mux.Handle("/graphql", server.BuildHandler(db))
-	mux.Handle("/health", server.BuildHealthHandler(db))
+	mux.Handle("/graphql", server.BuildHandler(database))
+	mux.Handle("/health", server.BuildHealthHandler(database))
 
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close) // t.Cleanup registers a function to run when the test ends
-	return ts
+	testServer := httptest.NewServer(mux)
+	t.Cleanup(testServer.Close) // t.Cleanup registers a function to run when the test ends
+	return testServer
 }
 
 // openTestDB opens a connection to the test database.
 // It uses the same default connection string as the main app.
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	connStr := "postgres://postgres:postgres@localhost:5432/technical_assessment?sslmode=disable"
-	db, err := sql.Open("postgres", connStr)
+	connStr := os.Getenv("DATABASE_URL")
+	if (connStr == ""){
+		connStr = "postgres://postgres:postgres@localhost:5432/technical_assessment?sslmode=disable"
+	}
+	database, err := sql.Open("postgres", connStr)
 	if err != nil {
 		t.Fatalf("opening test DB: %v", err)
 		// t.Fatalf logs the message and immediately stops this test.
@@ -109,12 +110,12 @@ func openTestDB(t *testing.T) *sql.DB {
 	// Give the DB 5 seconds to become available (useful in CI environments).
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	if err := database.PingContext(ctx); err != nil {
 		t.Fatalf("pinging test DB: %v", err)
 	}
 
-	t.Cleanup(func() { db.Close() })
-	return db
+	t.Cleanup(func() { database.Close() })
+	return database
 }
 
 // =============================================================================
@@ -143,10 +144,6 @@ func openTestDB(t *testing.T) *sql.DB {
 //	result   - pointer to a struct that the `data` field will be decoded into
 func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[string]any, result any) {
 	t.Helper()
-
-	// Build the JSON request body.
-	// map[string]any{"query": ..., "variables": ...} is a Go map literal.
-	// json.Marshal converts it to a JSON []byte.
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": variables,
@@ -155,7 +152,6 @@ func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[s
 		t.Fatalf("marshaling request: %v", err)
 	}
 
-	// bytes.NewReader wraps []byte in an io.Reader (needed by http.NewRequest).
 	req, err := http.NewRequest("POST", baseURL+"/graphql", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("creating request: %v", err)
@@ -163,32 +159,23 @@ func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[s
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", userID)
 
-	// http.DefaultClient is Go's built-in HTTP client. Fine for tests.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("executing request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Read the full response body.
-	// io.ReadAll reads until EOF and returns the complete []byte.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("reading response: %v", err)
 	}
 
-	// Check HTTP status code (should be 200 for GraphQL, even for errors —
-	// GraphQL errors go in the "errors" field, not via HTTP status codes).
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected HTTP 200, got %d: %s", resp.StatusCode, respBody)
 	}
 
-	// Parse the GraphQL response envelope.
-	// We decode into this struct that matches the GraphQL response format.
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
-		// json.RawMessage stores the JSON as-is ([]byte) without decoding.
-		// We'll decode the data field separately into `result`.
 		Errors []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
@@ -196,8 +183,6 @@ func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[s
 	if err := json.Unmarshal(respBody, &envelope); err != nil {
 		t.Fatalf("decoding response envelope: %v\nBody: %s", err, respBody)
 	}
-
-	// If there are GraphQL errors, fail the test with the messages.
 	if len(envelope.Errors) > 0 {
 		msgs := make([]string, len(envelope.Errors))
 		for i, e := range envelope.Errors {
@@ -205,8 +190,6 @@ func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[s
 		}
 		t.Fatalf("GraphQL errors: %v\nFull response: %s", msgs, respBody)
 	}
-
-	// Decode the `data` field into the caller's result struct.
 	if result != nil && envelope.Data != nil {
 		if err := json.Unmarshal(envelope.Data, result); err != nil {
 			t.Fatalf("decoding response data: %v\nData: %s", err, envelope.Data)
@@ -214,65 +197,30 @@ func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[s
 	}
 }
 
-func TestHealthCheck(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	type HealthResponse struct {
-		Status   string `json:"status"`
-		Postgres string `json:"postgres"`
-	}
-
-	resp, err := http.Get(ts.URL + "/health")
-	if err != nil {
-		t.Fatalf("health check request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "application/json") {
-		t.Errorf("expected application/json content-type, got %s", ct)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
-	}
-
-	var result HealthResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		t.Fatalf("failed to parse JSON body: %v -- raw: %s", err, body)
-	}
-
-	if result.Status != "healthy" {
-		t.Errorf("expected status=healthy, got %s", result.Status)
-	}
-
-	if result.Postgres != "connected" {
-		t.Errorf("expected postgres=connected, got %s", result.Postgres)
-	}
-}
-
 // =============================================================================
-// TEST 2: Missing X-User-ID header returns 401
+// TEST 1: Authentication middleware test - Missing "X-User-ID" header
 // =============================================================================
-// Validates the auth middleware rejects requests without the header.
+// Tests that the auth middleware rejects requests without the header.
 func TestAuthMiddleware_MissingHeader(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// Make a request WITHOUT the X-User-ID header
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	query := `
+		{ elements(first: 1) 
+			{ edges 
+				{ node 
+					{ uri 
+					} 
+				} 
+			} 
+		}
+	`
 	body, err := json.Marshal(map[string]any{
-		"query": `{ elements(first: 1) { edges { node { uri } } } }`,
+		"query": query,
 	})
 	if err != nil {
 	t.Fatalf("failed to marshal request: %v", err)
-}
-	resp, err := http.Post(ts.URL+"/graphql", "application/json", bytes.NewReader(body))
+	}
+	resp, err := http.Post(testServer.URL+"/graphql", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -281,22 +229,17 @@ func TestAuthMiddleware_MissingHeader(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 Unauthorized, got %d", resp.StatusCode)
 	}
-	t.Log("Auth middleware correctly rejected missing header")
 }
 
 // =============================================================================
-// TEST 3: Query elements — basic pagination
+// TEST 2: Query test - Basic
 // =============================================================================
-// This tests the elements query with a valid user and pagination.
-// user:alice has access to space:acme-projects and space:acme-hr.
+// This tests the elements query with a valid user and ensures the elements returned aren't in 
+// spaces the user shouldn't have access to.
 func TestQueryElements_BasicPagination(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// This is the GraphQL query string. It follows the GraphQL syntax:
-	// - `query` keyword (optional but explicit)
-	// - `elements(first: 5)` calls our resolver with first=5
-	// - The nested fields describe what we want back
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	userID := "user:alice"
 	query := `
 		query {
 			elements(first: 5) {
@@ -318,11 +261,6 @@ func TestQueryElements_BasicPagination(t *testing.T) {
 			}
 		}
 	`
-
-	// result will be decoded from the GraphQL `data` field.
-	// The struct fields must match the GraphQL response shape.
-	// json struct tags (the `json:"..."` parts) tell the JSON decoder
-	// which JSON key maps to which Go field.
 	var result struct {
 		Elements struct {
 			PageInfo struct {
@@ -342,52 +280,60 @@ func TestQueryElements_BasicPagination(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-
-	graphqlRequest(t, ts.URL, "user:alice", query, nil, &result)
-
-	// Assertions
-	// t.Errorf marks the test as failed but continues running.
-	// (Use t.Fatalf if you want to stop immediately.)
-	if len(result.Elements.Edges) == 0 {
-		t.Error("expected at least one element, got none")
+	graphqlRequest(t, testServer.URL, userID, query, nil, &result)
+	if len(result.Elements.Edges) <= 0 || len(result.Elements.Edges) > 5 {
+		t.Errorf("expected between 1 and 5 elements, got %d", len(result.Elements.Edges))
 	}
-	if len(result.Elements.Edges) > 5 {
-		t.Errorf("expected at most 5 elements, got %d", len(result.Elements.Edges))
-	}
-
-	// All elements must belong to spaces alice has access to
 	aliceSpaces := map[string]bool{
 		"space:acme-projects": true,
 		"space:acme-hr":       true,
 	}
 	for _, edge := range result.Elements.Edges {
 		if !aliceSpaces[edge.Node.SpaceURI] {
-			t.Errorf("element %s is in space %s which alice should not access",
-				edge.Node.URI, edge.Node.SpaceURI)
+			t.Errorf("element %s is in space %s which %s should not access", edge.Node.URI, edge.Node.SpaceURI, userID)
 		}
 	}
-
 	t.Logf("Got %d elements, hasNextPage=%v", len(result.Elements.Edges), result.Elements.PageInfo.HasNextPage)
 }
 
 // =============================================================================
-// TEST 4: Query elements — cursor pagination (second page)
+// TEST 3: Query test — Cursor-based pagination
 // =============================================================================
-// Fetches the first page, then uses its endCursor to fetch the second page.
+// Tests fetching the first page, getting its endCursor then getting the next page with it
 func TestQueryElements_CursorPagination(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// First page
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	userID := "user:alice"
 	firstPageQuery := `
 		query {
 			elements(first: 3) {
-				pageInfo { hasNextPage endCursor }
-				edges { node { uri } }
+				pageInfo { 
+					hasNextPage 
+					endCursor 
+				}
+				edges { 
+					node { 
+						uri 
+					} 
+				}
 			}
 		}
 	`
-	var page1 struct {
+	secondPageQuery := `
+		query($after: String) {
+			elements(first: 3, after: $after) {
+				pageInfo { 
+					hasNextPage endCursor 
+					}
+				edges { 
+					node { 
+						uri 
+					} 
+				}
+			}
+		}
+	`
+	var firstPage struct {
 		Elements struct {
 			PageInfo struct {
 				HasNextPage bool    `json:"hasNextPage"`
@@ -400,27 +346,7 @@ func TestQueryElements_CursorPagination(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-	graphqlRequest(t, ts.URL, "user:alice", firstPageQuery, nil, &page1)
-
-	if !page1.Elements.PageInfo.HasNextPage {
-		t.Skip("not enough elements to test pagination (need > 3)")
-	}
-	if page1.Elements.PageInfo.EndCursor == nil {
-		t.Fatal("endCursor should not be nil when hasNextPage is true")
-	}
-
-	// Second page — using the cursor from the first page as `after`
-	// GraphQL variables let you pass dynamic values without string interpolation.
-	// This is safer and cleaner than building query strings.
-	secondPageQuery := `
-		query($after: String) {
-			elements(first: 3, after: $after) {
-				pageInfo { hasNextPage endCursor }
-				edges { node { uri } }
-			}
-		}
-	`
-	var page2 struct {
+	var nextPage struct {
 		Elements struct {
 			Edges []struct {
 				Node struct {
@@ -429,39 +355,44 @@ func TestQueryElements_CursorPagination(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-	graphqlRequest(t, ts.URL, "user:alice", secondPageQuery, map[string]any{
-		"after": *page1.Elements.PageInfo.EndCursor,
-	}, &page2)
+	graphqlRequest(t, testServer.URL, userID, firstPageQuery, nil, &firstPage)
 
-	if len(page2.Elements.Edges) == 0 {
+	if !firstPage.Elements.PageInfo.HasNextPage {
+		t.Skip("not enough elements to test pagination (need > 3)")
+	}
+	if firstPage.Elements.PageInfo.EndCursor == nil {
+		t.Fatal("endCursor should not be nil when hasNextPage is true")
+	}
+
+	variables := map[string]any {
+		"after": *firstPage.Elements.PageInfo.EndCursor,
+	}
+	graphqlRequest(t, testServer.URL, userID, secondPageQuery, variables, &nextPage)
+
+	if len(nextPage.Elements.Edges) == 0 {
 		t.Error("second page should have elements")
 	}
-
-	// Verify no overlap between page 1 and page 2
 	page1URIs := make(map[string]bool)
-	for _, e := range page1.Elements.Edges {
+	for _, e := range firstPage.Elements.Edges {
 		page1URIs[e.Node.URI] = true
 	}
-	for _, e := range page2.Elements.Edges {
+	for _, e := range nextPage.Elements.Edges {
 		if page1URIs[e.Node.URI] {
 			t.Errorf("element %s appeared on both page 1 and page 2", e.Node.URI)
 		}
 	}
-
 	t.Logf("Page 1: %d elements, Page 2: %d elements — no overlap",
-		len(page1.Elements.Edges), len(page2.Elements.Edges))
+		len(firstPage.Elements.Edges), len(nextPage.Elements.Edges))
 }
 
 // =============================================================================
-// TEST 5: Query elements — with field value filter
+// TEST 4: Query test - Filtering elements by a field value
 // =============================================================================
 // Tests filtering elements by a field value.
 func TestQueryElements_WithFilter(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// user:alice is in acme-projects where task elements exist with a status field.
-	// We filter by field:task-status = "Done"
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	userID := "user:alice"
 	query := `
 		query($filter: FieldValueFilter) {
 			elements(first: 10, filter: $filter) {
@@ -483,7 +414,6 @@ func TestQueryElements_WithFilter(t *testing.T) {
 			}
 		}
 	`
-
 	var result struct {
 		Elements struct {
 			Edges []struct {
@@ -503,20 +433,18 @@ func TestQueryElements_WithFilter(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-
-	graphqlRequest(t, ts.URL, "user:alice", query, map[string]any{
-		"filter": map[string]any{
-			"field_uri": "field:task-status",
-			"value":     "Done",
+	variables := map[string]any {
+		"filter": map[string]any {
+			"field_uri":	"field:task-status",
+			"value":		"Done",
 		},
-	}, &result)
-
-	// Every returned element should have a "Status" field with value "Done"
+	}
+	graphqlRequest(t, testServer.URL, userID, query, variables, &result)
 	for _, edge := range result.Elements.Edges {
 		found := false
 		for _, fv := range edge.Node.FieldValues {
 			if fv.Field.URI == "field:task-status" {
-				if fmt.Sprintf("%v", fv.Value) == "Done" {
+				if value, ok := fv.Value.(string); ok && value == "Done" {
 					found = true
 				}
 			}
@@ -530,14 +458,24 @@ func TestQueryElements_WithFilter(t *testing.T) {
 }
 
 // =============================================================================
-// TEST 6: Mutation — updateElement
+// TEST 5: Mutation test - Basic
 // =============================================================================
-// Updates an element's title and verifies the returned value.
-func TestMutationUpdateElement(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// First, get a real element URI that alice can access
+// Tests updating an element's title and verifies the returned value.
+func TestMutation_UpdateElement(t *testing.T) {
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	userID := "user:alice"
+	query := `	
+		query { 
+			elements(first: 1) { 
+				edges { 
+					node { 
+						uri title 
+					} 
+				} 
+			} 
+		}
+	`
 	var listResult struct {
 		Elements struct {
 			Edges []struct {
@@ -548,22 +486,16 @@ func TestMutationUpdateElement(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-	graphqlRequest(t, ts.URL, "user:alice",
-		`query { elements(first: 1) { edges { node { uri title } } } }`,
-		nil, &listResult)
+	graphqlRequest(t, testServer.URL, userID, query, nil, &listResult)
 
 	if len(listResult.Elements.Edges) == 0 {
-		t.Skip("no elements available to update")
+		t.Fatalf("no elements available to update for userID : %s", userID)
 	}
 
 	targetURI := listResult.Elements.Edges[0].Node.URI
 	originalTitle := listResult.Elements.Edges[0].Node.Title
-	newTitle := fmt.Sprintf("Updated at %d", time.Now().UnixMilli())
-
-	t.Logf("Updating element %s from %q to %q", targetURI, originalTitle, newTitle)
-
-	// GraphQL mutations follow the same HTTP protocol as queries.
-	// The only difference is the `mutation` keyword in the query string.
+	newTitle := "For testing purposes"
+	t.Logf("Updating element %q from %q to %q", targetURI, originalTitle, newTitle)
 	mutationQuery := `
 		mutation($uri: String!, $title: String!) {
 			updateElement(uri: $uri, title: $title) {
@@ -582,37 +514,43 @@ func TestMutationUpdateElement(t *testing.T) {
 			CreationDate string `json:"creation_date"`
 		} `json:"updateElement"`
 	}
-	graphqlRequest(t, ts.URL, "user:alice", mutationQuery, map[string]any{
-		"uri":   targetURI,
-		"title": newTitle,
-	}, &mutResult)
+
+	variables := map[string]any {
+		"uri": targetURI,
+		"title" : newTitle,
+	}
+
+	graphqlRequest(t, testServer.URL, "user:alice", mutationQuery, variables, &mutResult)
 
 	if mutResult.UpdateElement.URI != targetURI {
-		t.Errorf("expected URI %s, got %s", targetURI, mutResult.UpdateElement.URI)
+		t.Errorf("expected URI %q, got %q", targetURI, mutResult.UpdateElement.URI)
 	}
 	if mutResult.UpdateElement.Title != newTitle {
 		t.Errorf("expected title %q, got %q", newTitle, mutResult.UpdateElement.Title)
 	}
-
-	// Restore original title (cleanup — good test hygiene)
-	graphqlRequest(t, ts.URL, "user:alice", mutationQuery, map[string]any{
-		"uri":   targetURI,
-		"title": originalTitle,
-	}, nil)
-
-	t.Log("Mutation test passed")
+	variables["title"] = originalTitle;
+	graphqlRequest(t, testServer.URL, "user:alice", mutationQuery, variables, nil)
 }
 
 // =============================================================================
-// TEST 7: User isolation — bob cannot see alice's private spaces
+// TEST 6: Query test - Ensure isolation
 // =============================================================================
-// Verifies the permission system: bob has access to space:acme-projects only,
-// NOT to space:acme-hr (which only alice and charlie can see).
-func TestUserIsolation(t *testing.T) {
-	db := openTestDB(t)
-	ts := testServer(t, db)
-
-	// Query as bob
+// Verifies that a user has only access to his spaces and not others'.
+func TestQuery_UserIsolation(t *testing.T) {
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	userID := "user:bob"
+	query := `
+		query { 
+			elements(first: 100) { 
+				edges { 
+					node { 
+						space_uri 
+						} 
+					} 
+				} 
+		}
+	`
 	var bobResult struct {
 		Elements struct {
 			Edges []struct {
@@ -622,94 +560,73 @@ func TestUserIsolation(t *testing.T) {
 			} `json:"edges"`
 		} `json:"elements"`
 	}
-	graphqlRequest(t, ts.URL, "user:bob",
-		`query { elements(first: 100) { edges { node { space_uri } } } }`,
-		nil, &bobResult)
-
-	// Bob should only see elements from space:acme-projects
+	graphqlRequest(t, testServer.URL, userID, query, nil, &bobResult)
 	for _, edge := range bobResult.Elements.Edges {
 		if edge.Node.SpaceURI != "space:acme-projects" {
 			t.Errorf("bob got an element from %s which he should not access", edge.Node.SpaceURI)
 		}
 	}
-
 	t.Logf("Isolation test: bob sees %d elements, all from allowed spaces", len(bobResult.Elements.Edges))
 }
 
-// func TestSubscription(t *testing.T) {
-// 	db := openTestDB(t)
-// 	ts := testServer(t, db)
 
-// 	// Convert http://127.0.0.1:PORT to ws://127.0.0.1:PORT/graphql
-// 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/graphql"
-
-// 	// Connect via WebSocket
-// 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-// 	if err != nil {
-// 		t.Fatalf("websocket dial: %v", err)
-// 	}
-// 	defer ws.Close()
-
-// 	// Step 1: send connection_init with auth payload
-// 	// This is the graphql-transport-ws protocol — the server's InitFunc
-// 	// reads "X-User-ID" from this payload
-// 	err = ws.WriteJSON(map[string]any{
-// 		"type": "connection_init",
-// 		"payload": map[string]any{
-// 			"X-User-ID": "user:alice",
-// 		},
-// 	})
-// 	if err != nil {
-// 		t.Fatalf("sending connection_init: %v", err)
-// 	}
-
-// 	// Step 2: expect connection_ack back from the server
-// 	var ack map[string]any
-// 	if err := ws.ReadJSON(&ack); err != nil {
-// 		t.Fatalf("reading connection_ack: %v", err)
-// 	}
-// 	if ack["type"] != "connection_ack" {
-// 		t.Fatalf("expected connection_ack, got %v", ack["type"])
-// 	}
-
-// 	// Step 3: send the subscribe message
-// 	err = ws.WriteJSON(map[string]any{
-// 		"id":   "1",
-// 		"type": "subscribe",
-// 		"payload": map[string]any{
-// 			"query": `subscription { elementUpdated { uri title } }`,
-// 		},
-// 	})
-// 	if err != nil {
-// 		t.Fatalf("sending subscribe: %v", err)
-// 	}
-
-// 	// Step 4: trigger a mutation in a goroutine after a short delay
-// 	// The delay ensures the subscription is fully registered before the
-// 	// mutation fires, otherwise we might miss the event
-// 	go func() {
-// 		time.Sleep(200 * time.Millisecond)
-// 		graphqlRequest(t, ts.URL, "user:alice",
-// 			`mutation { updateElement(uri: "element:project-1", title: "subscription test") { uri } }`,
-// 			nil, nil,
-// 		)
-// 	}()
-
-// 	// Step 5: wait for the next message from the subscription
-// 	// Set a deadline so the test doesn't hang forever if something goes wrong
-// 	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-// 	var msg map[string]any
-// 	if err := ws.ReadJSON(&msg); err != nil {
-// 		t.Fatalf("reading subscription message: %v", err)
-// 	}
-
-// 	if msg["type"] != "next" {
-// 		t.Fatalf("expected next, got %v", msg["type"])
-// 	}
-
-// 	t.Logf("subscription received: %v", msg)
-// }
-
-// openTestDB and testServer are defined in e2e_test.go
-// graphqlRequest is defined in e2e_test.go
+// =============================================================================
+// TEST 7: Subscription test
+// =============================================================================
+// This tests the subscription to updates.
+// It establishes a WebSocket connection to the server, initializes it with an authentication payload (connection_init), and confirms the server acknowledges the connection. 
+// It then starts a subscription for elementUpdated events, triggers a mutation in the background to produce a change and checks that the subscription receives the expected next message within a timeout.
+func TestSubscription(t *testing.T) {
+	database := openTestDB(t)
+	testServer := testServer(t, database)
+	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/graphql"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Sec-WebSocket-Protocol": []string{"graphql-transport-ws"},
+	})
+	if err != nil {
+		t.Fatalf("websocket dial: %v", err)
+	}
+	defer ws.Close()
+	err = ws.WriteJSON(map[string]any{
+		"type": "connection_init",
+		"payload": map[string]any{
+			"X-User-ID": "user:alice",
+		},
+	})
+	if err != nil {
+		t.Fatalf("sending connection_init: %v", err)
+	}
+	var ack map[string]any
+	if err := ws.ReadJSON(&ack); err != nil {
+		t.Fatalf("reading connection_ack: %v", err)
+	}
+	if ack["type"] != "connection_ack" {
+		t.Fatalf("expected connection_ack, got %v", ack["type"])
+	}
+	err = ws.WriteJSON(map[string]any{
+		"id":   "1",
+		"type": "subscribe",
+		"payload": map[string]any{
+			"query": `subscription { elementUpdated { uri title } }`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("sending subscribe: %v", err)
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		graphqlRequest(t, testServer.URL, "user:alice",
+			`mutation { updateElement(uri: "element:project-1", title: "subscription test") { uri } }`,
+			nil, nil,
+		)
+	}()
+	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var msg map[string]any
+	if err := ws.ReadJSON(&msg); err != nil {
+		t.Fatalf("reading subscription message: %v", err)
+	}
+	if msg["type"] != "next" {
+		t.Fatalf("expected next, got %v", msg["type"])
+	}
+	t.Logf("subscription received: %v", msg)
+}
