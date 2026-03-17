@@ -51,7 +51,10 @@ type Query {
 }
 
 type Mutation {
-  updateElement(uri: String!, title: String!): Element!
+  updateElement(
+    uri: String!
+    title: String!
+    ): Element!
 }
 
 type Subscription {
