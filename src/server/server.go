@@ -24,7 +24,7 @@ func Run(ctx context.Context, db *sql.DB, addr string) error {
 	http.Handle("/graphql", graphqlHandler)
 	http.Handle("/health", healthHandler)
 	http.Handle("/", playground.Handler("GraphQL Playground", "/graphql"))
-
+	log.Printf("Playground available at http://localhost%s/", addr)
 	log.Printf("GraphQL endpoint available at http://localhost%s/graphql", addr)
 
 	server := &http.Server{
@@ -92,7 +92,6 @@ func authMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
-
 
 func newHealthHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
