@@ -43,9 +43,9 @@ func (r *mutationResolver) UpdateElement(ctx context.Context, uri string, title 
 	defer r.mu.Unlock()
 	for ch := range r.subscribers {
 		select {
-			case ch <- elem:
-				log.Printf("pushed update for element \"%s\" to subscriber", uri)
-			default:
+		case ch <- elem:
+			log.Printf("pushed update for element \"%s\" to subscriber", uri)
+		default:
 		}
 	}
 	return elem, nil
