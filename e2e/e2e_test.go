@@ -43,52 +43,15 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// =============================================================================
-// TEST SETUP HELPERS
-// =============================================================================
 
 // testServer starts the real HTTP server using Go's httptest.NewServer.
-//
-// httptest.NewServer is part of Go's standard library (net/http/httptest).
-// Instead of binding to a real port on your machine, it creates a temporary
-// server on a random available port. This is perfect for tests: no port
-// conflicts, no cleanup needed for ports.
-//
-// It returns:
-//   - *httptest.Server: call testServer.Close() when done to shut it down
-//   - The base URL to use for requests (e.g., "http://127.0.0.1:54321")
 func testServer(t *testing.T, database *sql.DB) *httptest.Server {
-	t.Helper() // marks this as a helper so failures show the caller's line number
-
-	// We need to set up the HTTP mux (router) the same way server.Run does,
-	// but using httptest instead of a real server.
-	//
-	// http.NewServeMux creates a fresh mux (as opposed to http.DefaultServeMux
-	// which is the global one used by http.Handle). Using a fresh mux prevents
-	// test routes from leaking into other tests.
+	t.Helper()
 	mux := http.NewServeMux()
-
-	// We call the exported setup functions from the server package.
-	// But since those are unexported in server.go (lowercase), we need to
-	// call server.Run indirectly... OR we refactor server.go to expose
-	// the handler setup.
-	//
-	// Instead, we'll call the server package's handler builders directly.
-	// Since we can't call unexported functions from another package, we'll
-	// use a helper exported from server.go — or we can replicate the setup
-	// minimally here for the test.
-	//
-	// The cleanest approach: export a BuildHandler function from server package.
-	// But since we want to keep the test self-contained, we'll use the
-	// approach of running the server in a background goroutine and using
-	// a real HTTP client.
-	//
-	// Here we use BuildHandler which we'll add to server.go (see note below).
 	mux.Handle("/graphql", server.BuildHandler(database))
 	mux.Handle("/health", server.BuildHealthHandler(database))
-
 	testServer := httptest.NewServer(mux)
-	t.Cleanup(testServer.Close) // t.Cleanup registers a function to run when the test ends
+	t.Cleanup(testServer.Close)
 	return testServer
 }
 
@@ -118,31 +81,8 @@ func openTestDB(t *testing.T) *sql.DB {
 	return database
 }
 
-// =============================================================================
-// GraphQL HTTP CLIENT HELPER
-// =============================================================================
 // graphqlRequest sends a GraphQL query/mutation over HTTP POST to the server.
-//
-// The GraphQL HTTP protocol is simple:
-//
-//	POST /graphql
-//	Content-Type: application/json
-//	X-User-ID: <user>
-//	Body: {"query": "...", "variables": {...}}
-//
-// The response is:
-//
-//	{"data": {...}, "errors": [...]}
-//
-// Parameters:
-//
-//	t        - the test context
-//	baseURL  - e.g., "http://127.0.0.1:12345"
-//	userID   - the value to put in X-User-ID header
-//	query    - the GraphQL query string
-//	variables - optional variables map (can be nil)
-//	result   - pointer to a struct that the `data` field will be decoded into
-func graphqlRequest(t *testing.T, baseURL, userID, query string, variables map[string]any, result any) {
+func graphqlRequest(t *testing.T, baseURL string, userID string, query string, variables map[string]any, result any) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
